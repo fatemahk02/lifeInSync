@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "912962287480",
+    "project_id": "lifeinsync-bc99c",
+    "storage_bucket": "lifeinsync-bc99c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:912962287480:android:64414e71004fa3271aba8d",
+        "android_client_info": {
+          "package_name": "com.example.lifeinsync"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "912962287480-uv4mih0ap3o9h9jhdbtm9ed5e35a2ab1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.lifeinsync",
+            "certificate_hash": "cb09be41284cd35e476946de968d82812781890b"
+          }
+        },
+        {
+          "client_id": "912962287480-2tpgef2ofifj3b8t8o3j3v0i6hqkj6vu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAkA3kK8NqdRRlBK_Fsb4dAhAyUfPrMlcQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "912962287480-2tpgef2ofifj3b8t8o3j3v0i6hqkj6vu.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "912962287480-d97givufiqjt15vs3nbo2hhbdvm4uuqb.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.lifeinsync"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
