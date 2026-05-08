@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/theme/app_theme.dart';
+import '../../shared/services/firestore_service.dart';
+import '../../shared/services/weekly_report_service.dart';
 
 class InsightsScreen extends StatefulWidget {
   const InsightsScreen({super.key});
@@ -12,109 +16,257 @@ class InsightsScreen extends StatefulWidget {
 
 class _InsightsScreenState extends State<InsightsScreen> {
   int _selectedPeriod = 0; // 0=week, 1=month
+  int _refreshNonce = 0;
+  bool _exporting = false;
 
-  // Mock weekly wellbeing scores
-  final List<double> _wellbeingScores = [62, 71, 58, 75, 68, 82, 78];
-  final List<double> _fatigueScores = [42, 38, 55, 30, 45, 22, 35];
-  final List<String> _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  final _firestore = FirestoreService.instance;
 
-  // AI insights
-  final List<Map<String, String>> _insights = [
-    {
-      'emoji': '📈',
-      'text':
-          'Your wellbeing score improved by 16 points this week. Great progress!',
-    },
-    {
-      'emoji': '🧠',
-      'text':
-          'You focus better on Thursdays — your highest score was 75 this week.',
-    },
-    {
-      'emoji': '📱',
-      'text': 'Social app usage dropped 18% compared to last week. Keep it up!',
-    },
-    {
-      'emoji': '🔥',
-      'text': 'Your meditation habit streak is at 21 days — a personal best!',
-    },
-    {
-      'emoji': '⚠️',
-      'text':
-          'Late-night screen use on Friday spiked your fatigue score by +23 points.',
-    },
-  ];
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  Future<void> _refresh() async {
+    setState(() => _refreshNonce++);
+  }
+  
+  String _localizedInsightText(String text) {
+    final t = context.l10n;
+    if (text.startsWith('Your average wellbeing this period is ')) {
+      final value = text
+          .replaceFirst('Your average wellbeing this period is ', '')
+          .replaceFirst('.', '');
+      return '${t.tr('insightAvgWellbeingPrefix')} $value.';
+    }
+    if (text.startsWith('Average fatigue is ') && text.endsWith(' out of 100.')) {
+      final value = text
+          .replaceFirst('Average fatigue is ', '')
+          .replaceFirst(' out of 100.', '');
+      return '${t.tr('insightAvgFatiguePrefix')} $value ${t.tr('insightOutOf100')}.';
+    }
+    if (text.startsWith('You completed ') && text.contains(' of focus sessions in the last ')) {
+      final mid = text
+          .replaceFirst('You completed ', '')
+          .replaceFirst(' of focus sessions in the last ', '|')
+          .replaceFirst(' days.', '');
+      final parts = mid.split('|');
+      if (parts.length == 2) {
+        return '${t.tr('insightFocusCompletedPrefix')} ${parts[0]} ${t.tr('insightFocusCompletedSuffix')} ${parts[1]} ${t.tr('daysWord')}.';
+      }
+    }
+    if (text.startsWith('Productive usage ratio is ') && text.endsWith(' based on your logged data.')) {
+      final value = text
+          .replaceFirst('Productive usage ratio is ', '')
+          .replaceFirst(' based on your logged data.', '');
+      return '${t.tr('insightProductiveRatioPrefix')} $value ${t.tr('insightProductiveRatioSuffix')}.';
+    }
+    return text;
+  }
+
+  String _localizedCategoryLabel(String label) {
+    final t = context.l10n;
+    final lower = label.toLowerCase();
+    if (lower.contains('productive')) return t.tr('productive');
+    if (lower.contains('entertainment')) return t.tr('entertainment');
+    if (lower.contains('social')) return t.tr('social');
+    return label;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final t = context.l10n;
+    final uid = _uid;
+    final days = _selectedPeriod == 0 ? 7 : 30;
+
+    if (uid == null) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        body: SafeArea(
+          child: Center(child: Text(t.tr('signInToViewInsights'))),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: CustomScrollView(
-          physics: const BouncingScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Insights',
-                      style: Theme.of(context).textTheme.headlineLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Your weekly wellbeing report',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+      body: StreamBuilder<InsightData>(
+        key: ValueKey('insights_stream_$_refreshNonce'),
+        stream: _firestore.streamInsights(uid, days: days),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return SafeArea(
+              child: Center(
+                child: Text(
+                  t.tr('insightsLoadFailed'),
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
-            ),
+            );
+          }
 
-            SliverPadding(
-              padding: const EdgeInsets.all(24),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  // Period selector
-                  _buildPeriodToggle().animate().fadeIn(delay: 50.ms),
-                  const SizedBox(height: 20),
-
-                  // Summary cards row
-                  _buildSummaryRow()
-                      .animate()
-                      .fadeIn(delay: 100.ms)
-                      .slideY(begin: 0.1),
-                  const SizedBox(height: 20),
-
-                  // Wellbeing trend chart
-                  _buildWellbeingChart().animate().fadeIn(delay: 200.ms),
-                  const SizedBox(height: 20),
-
-                  // Productive vs Draining
-                  _buildProductiveVsDrainingCard().animate().fadeIn(
-                    delay: 300.ms,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Habit consistency
-                  _buildHabitConsistency().animate().fadeIn(delay: 400.ms),
-                  const SizedBox(height: 20),
-
-                  // AI Insights
-                  _buildAIInsightsCard().animate().fadeIn(delay: 500.ms),
-                  const SizedBox(height: 32),
-                ]),
+          if (!snapshot.hasData) {
+            return SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  _buildSkeleton(height: 48),
+                  const SizedBox(height: 12),
+                  _buildSkeleton(height: 96),
+                  const SizedBox(height: 12),
+                  _buildSkeleton(height: 220),
+                  const SizedBox(height: 12),
+                  _buildSkeleton(height: 180),
+                ],
               ),
+            );
+          }
+
+          final data = snapshot.data!;
+          final isEmpty =
+              data.focusHours == 0 &&
+              data.avgFatigue == 0 &&
+              data.avgWellbeing == 100 &&
+              data.habitConsistency.isEmpty;
+
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: CustomScrollView(
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                t.tr('insights'),
+                                style: Theme.of(context).textTheme.headlineLarge,
+                              ),
+                            ),
+                            if (_selectedPeriod == 0)
+                              IconButton(
+                                tooltip: 'Export weekly report',
+                                onPressed: _exporting
+                                    ? null
+                                    : () => _exportWeeklyReport(uid),
+                                icon: _exporting
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.picture_as_pdf_outlined),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          t.tr('insightsSubtitle'),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                SliverPadding(
+                  padding: const EdgeInsets.all(24),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      // Period selector
+                      _buildPeriodToggle(t).animate().fadeIn(delay: 50.ms),
+                      const SizedBox(height: 20),
+
+                      if (isEmpty)
+                        _buildEmptyState(context, t)
+                      else ...[
+                        _buildSummaryRow(data)
+                            .animate()
+                            .fadeIn(delay: 100.ms)
+                            .slideY(begin: 0.1),
+                        const SizedBox(height: 20),
+                        _buildWellbeingChart(data).animate().fadeIn(delay: 200.ms),
+                        const SizedBox(height: 20),
+                        _buildProductiveVsDrainingCard(data).animate().fadeIn(
+                          delay: 300.ms,
+                        ),
+                        const SizedBox(height: 20),
+                        _buildHabitConsistency(data)
+                            .animate()
+                            .fadeIn(delay: 400.ms),
+                        const SizedBox(height: 20),
+                        _buildAIInsightsCard(data).animate().fadeIn(delay: 500.ms),
+                      ],
+                      const SizedBox(height: 32),
+                    ]),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 
-  Widget _buildPeriodToggle() {
+  Future<void> _exportWeeklyReport(String uid) async {
+    setState(() => _exporting = true);
+    try {
+      await WeeklyReportService.instance.exportWeeklyReport(
+        context: context,
+        uid: uid,
+        days: 7,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.tr('insightsLoadFailed'))),
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Widget _buildSkeleton({required double height}) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [AppTheme.cardShadowLight],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context, AppLocalizations t) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [AppTheme.cardShadowLight],
+      ),
+      child: Column(
+        children: [
+          const Text('📊', style: TextStyle(fontSize: 32)),
+          const SizedBox(height: 8),
+          Text(t.tr('noInsightsYet'), style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+          Text(
+            t.tr('unlockInsightsHint'),
+            style: Theme.of(context).textTheme.bodySmall,
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPeriodToggle(AppLocalizations t) {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
@@ -126,14 +278,14 @@ class _InsightsScreenState extends State<InsightsScreen> {
         children: [
           Expanded(
             child: _PeriodTab(
-              label: 'This Week',
+              label: t.tr('thisWeek'),
               isSelected: _selectedPeriod == 0,
               onTap: () => setState(() => _selectedPeriod = 0),
             ),
           ),
           Expanded(
             child: _PeriodTab(
-              label: 'This Month',
+              label: t.tr('thisMonth'),
               isSelected: _selectedPeriod == 1,
               onTap: () => setState(() => _selectedPeriod = 1),
             ),
@@ -143,15 +295,16 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildSummaryRow() {
+  Widget _buildSummaryRow(InsightData data) {
+    final t = context.l10n;
     return Row(
       children: [
         Expanded(
           child: _SummaryCard(
             emoji: '✨',
-            title: 'Avg Score',
-            value: '70.6',
-            sub: 'wellbeing',
+            title: t.tr('avgScore'),
+            value: data.avgWellbeing.toStringAsFixed(1),
+            sub: t.tr('wellbeingWord'),
             color: AppTheme.primary,
           ),
         ),
@@ -159,8 +312,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
         Expanded(
           child: _SummaryCard(
             emoji: '😴',
-            title: 'Avg Fatigue',
-            value: '38',
+            title: t.tr('avgFatigue'),
+            value: data.avgFatigue.toStringAsFixed(1),
             sub: '/ 100',
             color: AppTheme.fatigueModerate,
           ),
@@ -169,9 +322,11 @@ class _InsightsScreenState extends State<InsightsScreen> {
         Expanded(
           child: _SummaryCard(
             emoji: '⏱️',
-            title: 'Focus',
-            value: '12.5h',
-            sub: 'this week',
+            title: t.tr('focusShort'),
+            value: '${data.focusHours.toStringAsFixed(1)}h',
+            sub: _selectedPeriod == 0
+                ? t.tr('thisWeekLower')
+                : t.tr('thisMonthLower'),
             color: AppTheme.secondary,
           ),
         ),
@@ -179,7 +334,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildWellbeingChart() {
+  Widget _buildWellbeingChart(InsightData data) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -190,16 +345,28 @@ class _InsightsScreenState extends State<InsightsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Wellbeing Trend',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              Text(
+                context.l10n.tr('wellbeingTrend'),
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
               ),
-              const Spacer(),
-              _buildLegendDot(AppTheme.primary, 'Wellbeing'),
-              const SizedBox(width: 12),
-              _buildLegendDot(AppTheme.fatigueModerate, 'Fatigue'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 12,
+                runSpacing: 6,
+                children: [
+                  _buildLegendDot(
+                    AppTheme.primary,
+                    context.l10n.tr('wellbeingWord'),
+                  ),
+                  _buildLegendDot(
+                    AppTheme.fatigueModerate,
+                    context.l10n.tr('fatigueScore'),
+                  ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -233,7 +400,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                       getTitlesWidget: (v, _) => Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          _days[v.toInt()],
+                          (v.toInt() >= 0 && v.toInt() < data.labels.length)
+                              ? data.labels[v.toInt()]
+                              : '',
                           style: const TextStyle(fontSize: 11),
                         ),
                       ),
@@ -243,7 +412,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                 lineBarsData: [
                   // Wellbeing line
                   LineChartBarData(
-                    spots: _wellbeingScores
+                    spots: data.wellbeingScores
                         .asMap()
                         .entries
                         .map((e) => FlSpot(e.key.toDouble(), e.value))
@@ -273,7 +442,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   ),
                   // Fatigue line
                   LineChartBarData(
-                    spots: _fatigueScores
+                    spots: data.fatigueScores
                         .asMap()
                         .entries
                         .map((e) => FlSpot(e.key.toDouble(), e.value))
@@ -293,7 +462,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildProductiveVsDrainingCard() {
+  Widget _buildProductiveVsDrainingCard(InsightData data) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -304,35 +473,29 @@ class _InsightsScreenState extends State<InsightsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Productive vs Draining',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          Text(
+            context.l10n.tr('productiveVsDraining'),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
           const SizedBox(height: 4),
           Text(
-            'Weekly app usage breakdown',
+            context.l10n.tr('weeklyAppUsageBreakdown'),
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 20),
 
           _ComparisonBar(
-            leftLabel: 'Productive',
-            rightLabel: 'Draining',
-            leftValue: 0.42,
-            rightValue: 0.58,
+            leftLabel: context.l10n.tr('productive'),
+            rightLabel: context.l10n.tr('draining'),
+            leftValue: data.productiveRatio,
+            rightValue: data.drainingRatio,
             leftColor: AppTheme.primary,
             rightColor: const Color(0xFFFF6B6B),
           ),
           const SizedBox(height: 16),
 
           // Category breakdown
-          ...[
-            ('Productive 🎯', '8h 30m', AppTheme.catProductive),
-            ('Entertainment 🎬', '6h 20m', AppTheme.catEntertainment),
-            ('Social 💬', '5h 10m', AppTheme.catSocial),
-            ('Education 📚', '2h 45m', AppTheme.catEducation),
-            ('Health ❤️', '1h 20m', AppTheme.catHealth),
-          ].map(
+          ...data.categoryRows.map(
             (row) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Row(
@@ -341,14 +504,14 @@ class _InsightsScreenState extends State<InsightsScreen> {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: row.$3,
+                      color: Color(row.$3),
                       shape: BoxShape.circle,
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      row.$1,
+                      _localizedCategoryLabel(row.$1),
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -360,7 +523,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: row.$3,
+                      color: Color(row.$3),
                     ),
                   ),
                 ],
@@ -372,14 +535,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildHabitConsistency() {
-    final habits = [
-      ('💧', 'Drink Water', 7, 7),
-      ('🏃', 'Exercise', 5, 7),
-      ('📚', 'Read', 4, 7),
-      ('🧘', 'Meditate', 7, 7),
-      ('📵', 'No phone 10pm', 3, 7),
-    ];
+  Widget _buildHabitConsistency(InsightData data) {
+    final habits = data.habitConsistency;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -391,13 +548,24 @@ class _InsightsScreenState extends State<InsightsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Habit Consistency',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          Text(
+            context.l10n.tr('habitConsistency'),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
           const SizedBox(height: 4),
-          Text('Past 7 days', style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            _selectedPeriod == 0
+                ? context.l10n.tr('past7Days')
+                : context.l10n.tr('past30Days'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
           const SizedBox(height: 16),
+
+          if (habits.isEmpty)
+            Text(
+              context.l10n.tr('noHabitLogsYet'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
 
           ...habits.map((h) {
             final pct = h.$3 / h.$4;
@@ -427,7 +595,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                             ),
                             const Spacer(),
                             Text(
-                              '${h.$3}/${h.$4} days',
+                              '${h.$3}/${h.$4} ${context.l10n.tr('daysWord')}',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
@@ -458,7 +626,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildAIInsightsCard() {
+  Widget _buildAIInsightsCard(InsightData data) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -492,13 +660,13 @@ class _InsightsScreenState extends State<InsightsScreen> {
               ),
               const SizedBox(width: 10),
               Text(
-                'Weekly Insights',
+                context.l10n.tr('weeklyInsights'),
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
             ],
           ),
           const SizedBox(height: 16),
-          ..._insights.asMap().entries.map(
+          ...data.insights.asMap().entries.map(
             (e) =>
                 Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -517,7 +685,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              e.value['text']!,
+                              _localizedInsightText(e.value['text'] ?? ''),
                               style: const TextStyle(
                                 fontSize: 13,
                                 height: 1.5,

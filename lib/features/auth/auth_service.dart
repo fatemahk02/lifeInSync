@@ -83,6 +83,12 @@ class AuthService {
       throw Exception(_friendlyError(e.code));
     } catch (e) {
       debugPrint('Google Sign-In error: $e');
+      final msg = e.toString();
+      if (msg.contains('ApiException: 10') || msg.contains('sign_in_failed')) {
+        throw Exception(
+          'Google Sign-In is not configured for this app signature yet. Add your Android SHA-1/SHA-256 in Firebase, download the updated google-services.json, and rebuild the app.',
+        );
+      }
       rethrow;
     }
   }

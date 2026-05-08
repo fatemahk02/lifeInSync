@@ -58,3 +58,8 @@ ios/Flutter/
 # Sensitive files (optional)
 android/key.properties
 android/app/*.keystore
+
+# Python virtual environments
+backend/venv/
+backend/.venv/
+.venv/

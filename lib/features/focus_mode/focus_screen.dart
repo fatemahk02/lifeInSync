@@ -1,7 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../core/localization/app_localizations.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../shared/services/app_preferences_service.dart';
+import '../../shared/services/firestore_service.dart';
 
 enum SessionType { pomodoro, deepWork, flowState }
 
@@ -15,11 +20,6 @@ class FocusScreen extends StatefulWidget {
 class _FocusScreenState extends State<FocusScreen>
     with TickerProviderStateMixin {
   // ── Session config ─────────────────────────────────────────
-  static const Map<SessionType, int> _durations = {
-    SessionType.pomodoro: 25 * 60,
-    SessionType.deepWork: 50 * 60,
-    SessionType.flowState: 90 * 60,
-  };
   static const Map<SessionType, String> _labels = {
     SessionType.pomodoro: 'Pomodoro',
     SessionType.deepWork: 'Deep Work',
@@ -30,17 +30,23 @@ class _FocusScreenState extends State<FocusScreen>
     SessionType.deepWork: '🧠',
     SessionType.flowState: '🌊',
   };
-  static const int _shortBreak = 5 * 60;
-  static const int _longBreak = 15 * 60;
+  static const int _shortBreak = AppConstants.shortBreak * 60;
+  static const int _longBreak = AppConstants.longBreak * 60;
 
   // ── State ──────────────────────────────────────────────────
   SessionType _sessionType = SessionType.pomodoro;
   int _secondsLeft = 25 * 60;
   bool _isRunning = false;
   bool _isBreak = false;
+  bool _loadingDurations = true;
   int _pomodorosToday = 0;
   int _focusStreak = 4; // days streak
   Timer? _timer;
+  final _firestore = FirestoreService.instance;
+  final _prefs = AppPreferencesService.instance;
+  late Map<SessionType, int> _durations;
+
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   late AnimationController _pulseController;
   late AnimationController _ringController;
@@ -57,6 +63,14 @@ class _FocusScreenState extends State<FocusScreen>
       vsync: this,
       duration: const Duration(milliseconds: 500),
     );
+
+    _durations = {
+      SessionType.pomodoro: AppConstants.pomodoroDuration * 60,
+      SessionType.deepWork: AppConstants.deepWorkDuration * 60,
+      SessionType.flowState: AppConstants.flowStateDuration * 60,
+    };
+    _secondsLeft = _durations[_sessionType]!;
+    unawaited(_loadSavedDurations());
   }
 
   @override
@@ -65,6 +79,37 @@ class _FocusScreenState extends State<FocusScreen>
     _pulseController.dispose();
     _ringController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSavedDurations() async {
+    final uid = _uid;
+    if (uid != null) {
+      final pomodoro = await _prefs.getPomodoroMinutes(
+        uid,
+        fallback: AppConstants.pomodoroDuration,
+      );
+      final deepWork = await _prefs.getDeepWorkMinutes(
+        uid,
+        fallback: AppConstants.deepWorkDuration,
+      );
+      final flowState = await _prefs.getFlowStateMinutes(
+        uid,
+        fallback: AppConstants.flowStateDuration,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _durations[SessionType.pomodoro] = pomodoro * 60;
+        _durations[SessionType.deepWork] = deepWork * 60;
+        _durations[SessionType.flowState] = flowState * 60;
+        _secondsLeft = _durations[_sessionType]!;
+        _loadingDurations = false;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _loadingDurations = false);
   }
 
   // ── Timer logic ────────────────────────────────────────────
@@ -95,6 +140,10 @@ class _FocusScreenState extends State<FocusScreen>
 
   void _onTimerComplete() {
     _timer?.cancel();
+    final completedFocusSession = !_isBreak;
+    if (completedFocusSession) {
+      unawaited(_saveCompletedFocusSession());
+    }
     setState(() {
       _isRunning = false;
       if (!_isBreak) {
@@ -109,6 +158,22 @@ class _FocusScreenState extends State<FocusScreen>
     _showCompletionSnackbar();
   }
 
+  Future<void> _saveCompletedFocusSession() async {
+    final uid = _uid;
+    if (uid == null) return;
+    try {
+      await _firestore.saveFocusSession(
+        uid: uid,
+        sessionType: _labels[_sessionType]!,
+        plannedSeconds: _durations[_sessionType]!,
+        completed: true,
+        completedAt: DateTime.now(),
+      );
+    } catch (_) {
+      // Keep timer flow smooth even if persistence fails.
+    }
+  }
+
   void _selectSession(SessionType type) {
     _timer?.cancel();
     setState(() {
@@ -119,14 +184,67 @@ class _FocusScreenState extends State<FocusScreen>
     });
   }
 
+  Future<void> _updateSessionDuration(SessionType type, int minutes) async {
+    final seconds = minutes * 60;
+    final uid = _uid;
+
+    setState(() {
+      _durations[type] = seconds;
+      if (!_isRunning && !_isBreak && _sessionType == type) {
+        _secondsLeft = seconds;
+      }
+    });
+
+    if (uid == null) return;
+    if (type == SessionType.pomodoro) {
+      await _prefs.setPomodoroMinutes(uid, minutes);
+    } else if (type == SessionType.deepWork) {
+      await _prefs.setDeepWorkMinutes(uid, minutes);
+    } else {
+      await _prefs.setFlowStateMinutes(uid, minutes);
+    }
+  }
+
+  Future<void> _resetDurationsToDefaults() async {
+    final defaults = <SessionType, int>{
+      SessionType.pomodoro: AppConstants.pomodoroDuration * 60,
+      SessionType.deepWork: AppConstants.deepWorkDuration * 60,
+      SessionType.flowState: AppConstants.flowStateDuration * 60,
+    };
+
+    final uid = _uid;
+    setState(() {
+      _durations = defaults;
+      if (!_isRunning && !_isBreak) {
+        _secondsLeft = _durations[_sessionType]!;
+      }
+    });
+
+    if (uid != null) {
+      await _prefs.setPomodoroMinutes(uid, AppConstants.pomodoroDuration);
+      await _prefs.setDeepWorkMinutes(uid, AppConstants.deepWorkDuration);
+      await _prefs.setFlowStateMinutes(uid, AppConstants.flowStateDuration);
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.tr('durationsReset')),
+        backgroundColor: AppTheme.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
   void _showCompletionSnackbar() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           _isBreak
-              ? '🎉 Session complete! Take a break.'
-              : '⚡ Break over. Ready to focus?',
+              ? '🎉 ${context.l10n.tr('sessionCompleteTakeBreak')}'
+              : '⚡ ${context.l10n.tr('breakOverReadyFocus')}',
         ),
         backgroundColor: AppTheme.primary,
         behavior: SnackBarBehavior.floating,
@@ -152,8 +270,21 @@ class _FocusScreenState extends State<FocusScreen>
   Color get _accentColor =>
       _isBreak ? const Color(0xFF29B6F6) : AppTheme.primary;
 
+  String _sessionLabel(SessionType type) {
+    final t = context.l10n;
+    switch (type) {
+      case SessionType.pomodoro:
+        return t.tr('pomodoro');
+      case SessionType.deepWork:
+        return t.tr('deepWork');
+      case SessionType.flowState:
+        return t.tr('flowState');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final t = context.l10n;
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
@@ -172,11 +303,13 @@ class _FocusScreenState extends State<FocusScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Focus Mode',
+                        t.tr('focusMode'),
                         style: Theme.of(context).textTheme.headlineLarge,
                       ),
                       Text(
-                        _isBreak ? 'Take a breather 😌' : 'Stay in the zone 🎯',
+                        _isBreak
+                            ? '${t.tr('focusModeSubtitleBreak')} 😌'
+                            : '${t.tr('focusModeSubtitleFocus')} 🎯',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -196,7 +329,7 @@ class _FocusScreenState extends State<FocusScreen>
                         const Text('🔥', style: TextStyle(fontSize: 16)),
                         const SizedBox(width: 4),
                         Text(
-                          '$_focusStreak day streak',
+                          '$_focusStreak ${t.tr('dayStreak')}',
                           style: const TextStyle(
                             fontWeight: FontWeight.w700,
                             color: Color(0xFFFF8A65),
@@ -212,6 +345,8 @@ class _FocusScreenState extends State<FocusScreen>
 
               // Session type selector
               _buildSessionSelector().animate().fadeIn(delay: 100.ms),
+              const SizedBox(height: 16),
+              _buildDurationCustomizer().animate().fadeIn(delay: 140.ms),
               const SizedBox(height: 40),
 
               // Timer ring
@@ -266,7 +401,7 @@ class _FocusScreenState extends State<FocusScreen>
                     Text(_emojis[type]!, style: const TextStyle(fontSize: 18)),
                     const SizedBox(height: 4),
                     Text(
-                      _labels[type]!,
+                      _sessionLabel(type),
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -282,6 +417,79 @@ class _FocusScreenState extends State<FocusScreen>
           );
         }).toList(),
       ),
+    );
+  }
+
+  Widget _buildDurationCustomizer() {
+    if (_loadingDurations) {
+      return const SizedBox(
+        height: 52,
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [AppTheme.cardShadowLight],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10n.tr('sessionDurations'),
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            context.l10n.tr('adjustTimesRoutine'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          _durationSlider(SessionType.pomodoro, 10, 60),
+          _durationSlider(SessionType.deepWork, 20, 120),
+          _durationSlider(SessionType.flowState, 30, 180),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _resetDurationsToDefaults,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(context.l10n.tr('resetDefaults')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _durationSlider(SessionType type, int min, int max) {
+    final currentMinutes = (_durations[type]! / 60).round();
+    return Column(
+      children: [
+        Row(
+          children: [
+            Text('${_emojis[type]} ${_sessionLabel(type)}'),
+            const Spacer(),
+            Text(
+              '$currentMinutes ${context.l10n.tr('minutesShort')}',
+              style: const TextStyle(
+                color: AppTheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        Slider(
+          value: currentMinutes.toDouble(),
+          min: min.toDouble(),
+          max: max.toDouble(),
+          divisions: max - min,
+          onChanged: (v) => _updateSessionDuration(type, v.round()),
+        ),
+      ],
     );
   }
 
@@ -359,7 +567,7 @@ class _FocusScreenState extends State<FocusScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _isBreak ? 'Break time' : _labels[_sessionType]!,
+                  _isBreak ? context.l10n.tr('breakTime') : _sessionLabel(_sessionType),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -413,7 +621,7 @@ class _FocusScreenState extends State<FocusScreen>
           child: _FocusStatCard(
             emoji: '🍅',
             value: '$_pomodorosToday',
-            label: 'Sessions today',
+            label: context.l10n.tr('sessionsToday'),
             color: AppTheme.primary,
           ),
         ),
@@ -422,7 +630,7 @@ class _FocusScreenState extends State<FocusScreen>
           child: _FocusStatCard(
             emoji: '⏳',
             value: '${(_pomodorosToday * 25)}m',
-            label: 'Focused today',
+            label: context.l10n.tr('focusedToday'),
             color: AppTheme.secondary,
           ),
         ),
@@ -431,7 +639,7 @@ class _FocusScreenState extends State<FocusScreen>
           child: _FocusStatCard(
             emoji: '🔥',
             value: '$_focusStreak',
-            label: 'Day streak',
+            label: context.l10n.tr('dayStreak'),
             color: const Color(0xFFFF8A65),
           ),
         ),
@@ -441,11 +649,11 @@ class _FocusScreenState extends State<FocusScreen>
 
   Widget _buildTipCard() {
     final tips = [
-      '💡 Put your phone face-down during sessions',
-      '🎧 Try lo-fi music to help concentration',
-      '💧 Keep water nearby to stay hydrated',
-      '🌿 A plant on your desk reduces stress',
-      '📵 Enable Do Not Disturb before starting',
+      '💡 ${context.l10n.tr('focusTip1')}',
+      '🎧 ${context.l10n.tr('focusTip2')}',
+      '💧 ${context.l10n.tr('focusTip3')}',
+      '🌿 ${context.l10n.tr('focusTip4')}',
+      '📵 ${context.l10n.tr('focusTip5')}',
     ];
     final tip = tips[_pomodorosToday % tips.length];
 

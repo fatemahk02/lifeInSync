@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "912962287480-uea221orh40ress2emk3qgrjdavlasch.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.lifeinsync",
+            "certificate_hash": "a4b7bdbd8243817492eee82aff7ede37efe56e07"
+          }
+        },
+        {
           "client_id": "912962287480-uv4mih0ap3o9h9jhdbtm9ed5e35a2ab1.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

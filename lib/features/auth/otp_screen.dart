@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:pinput/pinput.dart';
 import '../../core/theme/app_theme.dart';
+import '../../shared/services/input_sanitizer.dart';
 import 'auth_service.dart';
-import 'login_screen.dart';
+import '../dashboard/main_shell.dart';
 
 class OtpScreen extends StatefulWidget {
-  const OtpScreen({super.key});
+  final String? initialPhoneNumber;
+
+  const OtpScreen({super.key, this.initialPhoneNumber});
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -32,6 +35,16 @@ class _OtpScreenState extends State<OtpScreen>
       vsync: this,
       duration: const Duration(seconds: 8),
     )..repeat(reverse: true);
+
+    final initial = InputSanitizer.sanitizePhone(widget.initialPhoneNumber ?? '');
+    if (initial.isNotEmpty) {
+      _phoneController.text = initial;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_codeSent && !_isLoading) {
+          _sendOTP();
+        }
+      });
+    }
   }
 
   @override
@@ -396,7 +409,8 @@ class _OtpScreenState extends State<OtpScreen>
   }
 
   Future<void> _sendOTP() async {
-    final phone = _phoneController.text.trim();
+    final phone = InputSanitizer.sanitizePhone(_phoneController.text);
+    _phoneController.text = phone;
     if (phone.isEmpty) {
       setState(() => _errorText = 'Please enter a phone number');
       return;
@@ -416,7 +430,7 @@ class _OtpScreenState extends State<OtpScreen>
         phoneNumber: phone,
         verificationCompleted: (credential) async {
           await FirebaseAuth.instance.signInWithCredential(credential);
-          if (mounted) _goToLogin();
+          if (mounted) _goHome();
         },
         codeSent: (verificationId, _) {
           if (mounted)
@@ -446,7 +460,10 @@ class _OtpScreenState extends State<OtpScreen>
   }
 
   Future<void> _verifyOTP(String code) async {
-    if (code.length < 6) {
+    final sanitizedOtp = InputSanitizer.sanitizeOtp(code);
+    _pinController.text = sanitizedOtp;
+
+    if (sanitizedOtp.length < 6) {
       setState(() => _errorText = 'Enter the complete 6-digit code');
       return;
     }
@@ -461,9 +478,9 @@ class _OtpScreenState extends State<OtpScreen>
     try {
       await _authService.verifyOTPAndSignIn(
         verificationId: _verificationId!,
-        smsCode: code,
+        smsCode: sanitizedOtp,
       );
-      if (mounted) _goToLogin();
+      if (mounted) _goHome();
     } catch (e) {
       if (mounted)
         setState(() {
@@ -473,9 +490,9 @@ class _OtpScreenState extends State<OtpScreen>
     }
   }
 
-  void _goToLogin() => Navigator.pushAndRemoveUntil(
+  void _goHome() => Navigator.pushAndRemoveUntil(
     context,
-    MaterialPageRoute(builder: (_) => const LoginScreen()),
+    MaterialPageRoute(builder: (_) => const MainShell()),
     (route) => false,
   );
 }

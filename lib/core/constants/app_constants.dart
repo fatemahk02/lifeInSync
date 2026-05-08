@@ -1,4 +1,10 @@
 class AppConstants {
+  // Backend
+  static const String fastApiBaseUrl = String.fromEnvironment(
+    'FASTAPI_BASE_URL',
+    defaultValue: 'http://10.0.2.2:8000',
+  );
+
   // Screen time thresholds (minutes)
   static const int screenTimeWarning = 240; // 4 hours
   static const int screenTimeDanger = 360; // 6 hours

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/theme/app_theme.dart';
 import 'category_rules_engine.dart';
+import '../../shared/services/screen_time_service.dart';
 
 class AppInfo {
   final String name;
@@ -27,53 +29,52 @@ class CategorizerScreen extends StatefulWidget {
 class _CategorizerScreenState extends State<CategorizerScreen> {
   AppCategory? _selectedFilter;
   int? _touchedIndex;
+  final _screenTimeService = ScreenTimeService.instance;
+  bool _isLoading = true;
+  bool _hasPermission = true;
 
-  final List<AppInfo> _apps = [
-    AppInfo(
-      name: 'Instagram',
-      packageName: 'com.instagram.android',
-      usageMinutes: 82,
-    ),
-    AppInfo(
-      name: 'YouTube',
-      packageName: 'com.google.android.youtube',
-      usageMinutes: 65,
-    ),
-    AppInfo(name: 'WhatsApp', packageName: 'com.whatsapp', usageMinutes: 45),
-    AppInfo(name: 'Notion', packageName: 'com.notion.id', usageMinutes: 38),
-    AppInfo(
-      name: 'Spotify',
-      packageName: 'com.spotify.music',
-      usageMinutes: 34,
-    ),
-    AppInfo(
-      name: 'Gmail',
-      packageName: 'com.google.android.gm',
-      usageMinutes: 22,
-    ),
-    AppInfo(name: 'Duolingo', packageName: 'com.duolingo', usageMinutes: 20),
-    AppInfo(
-      name: 'Twitter/X',
-      packageName: 'com.twitter.android',
-      usageMinutes: 18,
-    ),
-    AppInfo(
-      name: 'Headspace',
-      packageName: 'com.headspace.android',
-      usageMinutes: 15,
-    ),
-    AppInfo(
-      name: 'Maps',
-      packageName: 'com.google.android.apps.maps',
-      usageMinutes: 12,
-    ),
-    AppInfo(
-      name: 'Netflix',
-      packageName: 'com.netflix.mediaclient',
-      usageMinutes: 48,
-    ),
-    AppInfo(name: 'Slack', packageName: 'com.slack', usageMinutes: 30),
-  ];
+  List<AppInfo> _apps = const <AppInfo>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsageData();
+  }
+
+  Future<void> _loadUsageData() async {
+    setState(() => _isLoading = true);
+    final hasPermission = await _screenTimeService.hasUsagePermission();
+
+    if (!hasPermission) {
+      setState(() {
+        _hasPermission = false;
+        _apps = const <AppInfo>[];
+        _isLoading = false;
+      });
+      return;
+    }
+
+    final usageEntries = await _screenTimeService.getTodayUsage(
+      top: 30,
+      minUsageMinutes: 2,
+    );
+    final apps = usageEntries
+        .map(
+          (e) => AppInfo(
+            name: e.appName,
+            packageName: e.packageName,
+            usageMinutes: e.usageMinutes,
+          ),
+        )
+        .toList(growable: false);
+
+    if (!mounted) return;
+    setState(() {
+      _hasPermission = true;
+      _apps = apps;
+      _isLoading = false;
+    });
+  }
 
   List<AppInfo> get _filteredApps => _selectedFilter == null
       ? _apps
@@ -89,12 +90,35 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
 
   int get _totalMinutes => _apps.fold(0, (sum, a) => sum + a.usageMinutes);
 
-  int get _healthyMinutes => _apps
-      .where((a) => a.category.isHealthy)
+  int get _drainingMinutes => _apps
+      .where(
+        (a) =>
+            a.category == AppCategory.social ||
+            a.category == AppCategory.entertainment ||
+            a.category == AppCategory.gaming,
+      )
       .fold(0, (sum, a) => sum + a.usageMinutes);
+
+  // Healthy ratio is derived as total usage minus explicitly draining usage.
+  int get _healthyMinutes => (_totalMinutes - _drainingMinutes).clamp(0, _totalMinutes);
+
+  String _categoryLabel(AppCategory category) {
+    final t = context.l10n;
+    switch (category) {
+      case AppCategory.productive:
+        return t.tr('productive');
+      case AppCategory.entertainment:
+        return t.tr('entertainment');
+      case AppCategory.social:
+        return t.tr('social');
+      default:
+        return category.label;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final t = context.l10n;
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
@@ -109,12 +133,12 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'App Categories',
+                      t.tr('appCategories'),
                       style: Theme.of(context).textTheme.headlineLarge,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Auto-categorized by usage patterns',
+                      t.tr('autoCategorizedByUsage'),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -134,6 +158,20 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
                       .slideY(begin: 0.1),
                   const SizedBox(height: 20),
 
+                  if (_isLoading)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 20),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+
+                  if (!_hasPermission)
+                    _buildPermissionCard()
+                        .animate()
+                        .fadeIn(delay: 140.ms)
+                        .slideY(begin: 0.08),
+
+                  if (!_hasPermission) const SizedBox(height: 20),
+
                   // Pie chart — FIXED center layout
                   _buildPieChart().animate().fadeIn(delay: 200.ms),
                   const SizedBox(height: 20),
@@ -142,9 +180,22 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
                   _buildFilterChips().animate().fadeIn(delay: 300.ms),
                   const SizedBox(height: 16),
 
+                  if (_filteredApps.isEmpty && !_isLoading)
+                    Text(
+                      _hasPermission
+                          ? t.tr('noUsageToday')
+                          : t.tr('grantUsagePermissionCategories'),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  if (_filteredApps.isEmpty && !_isLoading)
+                    const SizedBox(height: 12),
+
                   // App list
                   ..._filteredApps.asMap().entries.map(
-                    (e) => _AppCategoryTile(app: e.value)
+                    (e) => _AppCategoryTile(
+                      app: e.value,
+                      categoryLabel: _categoryLabel(e.value.category),
+                    )
                         .animate()
                         .fadeIn(delay: Duration(milliseconds: 350 + e.key * 50))
                         .slideX(begin: 0.1),
@@ -160,14 +211,57 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
     );
   }
 
+  Widget _buildPermissionCard() {
+    final t = context.l10n;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [AppTheme.cardShadowLight],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t.tr('usageAccessNeeded'),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            t.tr('usageAccessPrompt'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              ElevatedButton(
+                onPressed: () async {
+                  await _screenTimeService.openUsageAccessSettings();
+                  await _loadUsageData();
+                },
+                child: Text(t.tr('openSettings')),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton(
+                onPressed: _loadUsageData,
+                child: Text(t.tr('refresh')),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Health Ratio Card ─────────────────────────────────────
   Widget _buildHealthRatioCard() {
+    final t = context.l10n;
     final healthyPct = _totalMinutes == 0
         ? 0
         : (_healthyMinutes / _totalMinutes * 100).round();
-    final drainingPct = 100 - healthyPct;
     final healthyTime = '${_healthyMinutes ~/ 60}h ${_healthyMinutes % 60}m';
-    final drainingMins = _totalMinutes - _healthyMinutes;
+    final drainingMins = _drainingMinutes;
     final drainingTime = '${drainingMins ~/ 60}h ${drainingMins % 60}m';
 
     return Container(
@@ -186,8 +280,8 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Title row
-          const Text(
-            'Usage Health',
+          Text(
+            t.tr('usageHealth'),
             style: TextStyle(
               color: Colors.white70,
               fontSize: 13,
@@ -198,7 +292,7 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
 
           // Big percentage
           Text(
-            '$healthyPct% healthy',
+            '$healthyPct% ${t.tr('healthy')}',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 36,
@@ -223,43 +317,9 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
           // Two stat pills side by side — BELOW the bar, not on the right
           Row(
             children: [
-              _StatPill(emoji: '🎯', label: 'Productive', value: healthyTime),
+              _StatPill(emoji: '🎯', label: t.tr('healthy'), value: healthyTime),
               const SizedBox(width: 10),
-              _StatPill(emoji: '📱', label: 'Draining', value: drainingTime),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMiniStat(String emoji, String value, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(emoji, style: const TextStyle(fontSize: 14)),
-          const SizedBox(width: 6),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                ),
-              ),
-              Text(
-                label,
-                style: const TextStyle(color: Colors.white70, fontSize: 10),
-              ),
+              _StatPill(emoji: '📱', label: t.tr('draining'), value: drainingTime),
             ],
           ),
         ],
@@ -307,11 +367,11 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           // Title left-aligned
-          const Align(
+          Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              'Category Breakdown',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              context.l10n.tr('categoryBreakdown'),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
             ),
           ),
           const SizedBox(height: 24),
@@ -375,7 +435,7 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        e.key.label,
+                        _categoryLabel(e.key),
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
@@ -414,7 +474,7 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
         itemBuilder: (context, i) {
           if (i == 0) {
             return _FilterChip(
-              label: 'All',
+              label: context.l10n.tr('all'),
               isSelected: _selectedFilter == null,
               color: AppTheme.primary,
               onTap: () => setState(() => _selectedFilter = null),
@@ -422,7 +482,7 @@ class _CategorizerScreenState extends State<CategorizerScreen> {
           }
           final cat = categories[i - 1];
           return _FilterChip(
-            label: cat.label,
+            label: _categoryLabel(cat),
             isSelected: _selectedFilter == cat,
             color: cat.color,
             onTap: () => setState(
@@ -487,7 +547,9 @@ class _FilterChip extends StatelessWidget {
 // ── App Category Tile ─────────────────────────────────────────
 class _AppCategoryTile extends StatelessWidget {
   final AppInfo app;
-  const _AppCategoryTile({required this.app});
+  final String categoryLabel;
+
+  const _AppCategoryTile({required this.app, required this.categoryLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -561,7 +623,7 @@ class _AppCategoryTile extends StatelessWidget {
                           Icon(app.category.icon, size: 10, color: color),
                           const SizedBox(width: 3),
                           Text(
-                            app.category.label,
+                            categoryLabel,
                             style: TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w700,

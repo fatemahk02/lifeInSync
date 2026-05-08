@@ -1,0 +1,153 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isShortString(value, max) {
+      return value is string && value.size() > 0 && value.size() <= max;
+    }
+
+    function isStringUpTo(value, max) {
+      return value is string && value.size() <= max;
+    }
+
+    function validGender(value) {
+      return value is string
+        && (
+          value == ''
+          || value == 'Male'
+          || value == 'Female'
+          || value == 'Other'
+          || value == 'Prefer not to say'
+        );
+    }
+
+    function isTimestamp(value) {
+      return value is timestamp;
+    }
+
+    function hasOnlyUserKeys() {
+      return request.resource.data.keys().hasOnly([
+        'name',
+        'email',
+        'mobileNumber',
+        'gender',
+        'age',
+        'preferences',
+        'avatarEmoji',
+        'timezone',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function validPreferencesMap(prefs) {
+      return prefs is map
+        && prefs.keys().hasOnly([
+          'dailyScreenLimitMinutes',
+          'notificationsEnabled',
+          'focusGoalMinutes',
+          'onboardingCompleted',
+          'theme'
+        ])
+        && (!('dailyScreenLimitMinutes' in prefs) || prefs.dailyScreenLimitMinutes is int)
+        && (!('notificationsEnabled' in prefs) || prefs.notificationsEnabled is bool)
+        && (!('focusGoalMinutes' in prefs) || prefs.focusGoalMinutes is int)
+        && (!('onboardingCompleted' in prefs) || prefs.onboardingCompleted is bool)
+        && (!('theme' in prefs) || prefs.theme is string);
+    }
+
+    function validUserDocument() {
+      return hasOnlyUserKeys()
+        && (!('name' in request.resource.data) || isShortString(request.resource.data.name, 80))
+        && (!('email' in request.resource.data) || isShortString(request.resource.data.email, 160))
+        && (!('mobileNumber' in request.resource.data) || isStringUpTo(request.resource.data.mobileNumber, 24))
+        && (!('gender' in request.resource.data) || validGender(request.resource.data.gender))
+        && (!('age' in request.resource.data)
+          || (
+            request.resource.data.age is int
+            && request.resource.data.age >= 0
+            && request.resource.data.age <= 120
+          ))
+        && (!('avatarEmoji' in request.resource.data) || isStringUpTo(request.resource.data.avatarEmoji, 8))
+        && (!('timezone' in request.resource.data) || isStringUpTo(request.resource.data.timezone, 80))
+        && (!('createdAt' in request.resource.data) || isTimestamp(request.resource.data.createdAt))
+        && (!('updatedAt' in request.resource.data) || isTimestamp(request.resource.data.updatedAt))
+        && (!('preferences' in request.resource.data)
+          || validPreferencesMap(request.resource.data.preferences));
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && validUserDocument();
+      allow delete: if false;
+    }
+
+    match /habits/{userId}/items/{habitId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && isShortString(request.resource.data.name, 80)
+        && isShortString(request.resource.data.emoji, 8)
+        && isShortString(request.resource.data.frequency, 20)
+        && request.resource.data.streak is int
+        && request.resource.data.completedToday is bool
+        && request.resource.data.reminderHour is int
+        && request.resource.data.reminderHour >= 0
+        && request.resource.data.reminderHour <= 23
+        && request.resource.data.reminderMinute is int
+        && request.resource.data.reminderMinute >= 0
+        && request.resource.data.reminderMinute <= 59;
+      allow delete: if isOwner(userId);
+    }
+
+    match /habitLogs/{userId}/logs/{logId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && isShortString(request.resource.data.habitId, 80)
+        && isShortString(request.resource.data.habitName, 80)
+        && request.resource.data.completed is bool
+        && isTimestamp(request.resource.data.date);
+      allow delete: if false;
+    }
+
+    match /focusSessions/{userId}/sessions/{sessionId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && isShortString(request.resource.data.sessionType, 32)
+        && request.resource.data.plannedSeconds is int
+        && request.resource.data.plannedSeconds > 0
+        && request.resource.data.completed is bool
+        && isTimestamp(request.resource.data.completedAt);
+      allow delete: if false;
+    }
+
+    match /fatigueHistory/{userId}/logs/{logId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && request.resource.data.score is int
+        && request.resource.data.score >= 0
+        && request.resource.data.score <= 100
+        && isShortString(request.resource.data.level, 24)
+        && request.resource.data.breakdown is map
+        && request.resource.data.triggers is list
+        && isShortString(request.resource.data.recommendation, 500)
+        && isTimestamp(request.resource.data.date);
+      allow delete: if false;
+    }
+
+    match /analytics/{userId}/{periodCollection}/{docId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && request.resource.data.period is string
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
+    }
+  }
+}

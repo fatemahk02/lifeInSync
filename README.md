@@ -15,6 +15,7 @@ LifeInSync is a mobile-first wellbeing app built with Flutter and Firebase. It g
 | Layer | Technology |
 |---|---|
 | Framework | Flutter (Dart) |
+| Backend API | FastAPI (Python) |
 | Authentication | Firebase Auth (Email, Google, Phone OTP) |
 | Database (Cloud) | Cloud Firestore |
 | Database (Local) | Drift / SQLite |
@@ -61,7 +62,7 @@ LifeInSync is a mobile-first wellbeing app built with Flutter and Firebase. It g
 - [x] Today's total card with over/under limit indicator
 - [x] Per-app usage list with category badges and progress bars
 - [x] Daily screen limit slider
-- [x] Static mock data (real data wiring = TODO)
+- [x] Real Android usage data via `ScreenTimeService` (`app_usage`)
 
 ### 📂 App Categorizer
 - [x] Rule-based categorization engine (`category_rules_engine.dart`)
@@ -71,7 +72,7 @@ LifeInSync is a mobile-first wellbeing app built with Flutter and Firebase. It g
 - [x] Pie chart centered with legend (interactive touch)
 - [x] Filter chips by category
 - [x] Per-app tile with usage bar
-- [x] Static mock data (real data wiring = TODO)
+- [x] Real app usage feed from `ScreenTimeService`
 
 ### ⏱️ Focus Mode
 - [x] Three session types: Pomodoro (25m), Deep Work (50m), Flow State (90m)
@@ -81,7 +82,7 @@ LifeInSync is a mobile-first wellbeing app built with Flutter and Firebase. It g
 - [x] Session tip card
 - [x] Play / Pause / Reset / Skip controls
 - [x] Session completion snackbar
-- [x] Focus sessions NOT yet saved to Firestore (TODO)
+- [x] Focus sessions saved to Firestore on session completion
 
 ### 😴 Fatigue Tracker
 - [x] Auto-detection algorithm (`fatigue_detector.dart`)
@@ -90,17 +91,17 @@ LifeInSync is a mobile-first wellbeing app built with Flutter and Firebase. It g
 - [x] 4 fatigue levels: Fresh, Mild, Moderate, High
 - [x] Score gauge ring UI
 - [x] Score breakdown card with per-factor bars
-- [x] 7-day history bar chart (mock data)
+- [x] 7-day history bar chart (reads Firestore fatigue logs)
 - [x] Trigger list with severity badges
 - [x] Recommendation card
-- [x] NOT yet saving to Firestore (TODO)
+- [x] Daily fatigue score saved to Firestore
 
 ### ✅ Habits
 - [x] Habit list with emoji, name, streak, completion toggle
 - [x] Animated checkmark toggle
 - [x] Add habit bottom sheet (emoji picker + name field)
 - [x] Progress card (today's completion %)
-- [x] Static in-memory state (Firestore wiring = TODO)
+- [x] Firestore-backed stream + writes + completion logs
 
 ### 📊 Insights
 - [x] Week / Month toggle
@@ -109,8 +110,8 @@ LifeInSync is a mobile-first wellbeing app built with Flutter and Firebase. It g
 - [x] Productive vs Draining comparison bar
 - [x] Category time breakdown list
 - [x] Habit consistency bars (7-day)
-- [x] AI Insights cards (pattern-based text, static)
-- [x] All static mock data (real data wiring = TODO)
+- [x] AI Insights cards (generated from Firestore-backed analytics)
+- [x] Real data wiring from Firestore collections (week/month)
 
 ### 🚪 Navigation & Global Shell
 - [x] `MainShell` with GlobalKey Scaffold
@@ -128,53 +129,53 @@ LifeInSync is a mobile-first wellbeing app built with Flutter and Firebase. It g
 
 ### 🔴 Priority 1 — Backend Wiring (Core)
 
-- [ ] **Add `cloud_firestore` package** to `pubspec.yaml`
-- [ ] **Create `FirestoreService`** at `lib/shared/services/firestore_service.dart`
-- [ ] **Wire user profile creation** on signup (save name, email, preferences to Firestore)
-- [ ] **Wire Habits to Firestore** — replace static list with `StreamBuilder` reading from `habits/{uid}/items`
-- [ ] **Wire Habit logging** — toggle = write to `habitLogs/{uid}/logs/{habitId}_{date}`
-- [ ] **Wire Focus sessions** — save to `focusSessions/{uid}/sessions` on session complete
-- [ ] **Wire Fatigue score** — save daily score to `fatigueHistory/{uid}/logs/{date}`
-- [ ] **Wire Insights** — read real data from all Firestore collections instead of mock arrays
+- [x] **Add `cloud_firestore` package** to `pubspec.yaml`
+- [x] **Create `FirestoreService`** at `lib/shared/services/firestore_service.dart`
+- [x] **Wire user profile creation** on signup (save name, email, preferences to Firestore)
+- [x] **Wire Habits to Firestore** — replace static list with `StreamBuilder` reading from `habits/{uid}/items`
+- [x] **Wire Habit logging** — toggle = write to `habitLogs/{uid}/logs/{habitId}_{date}`
+- [x] **Wire Focus sessions** — save to `focusSessions/{uid}/sessions` on session complete
+- [x] **Wire Fatigue score** — save daily score to `fatigueHistory/{uid}/logs/{date}`
+- [x] **Wire Insights** — read real data from all Firestore collections instead of mock arrays
 
 ### 🟡 Priority 2 — Real Screen Time Data
 
-- [ ] **Request PACKAGE_USAGE_STATS permission** on first launch (Android)
-- [ ] **Create `ScreenTimeService`** using `app_usage` package
-- [ ] **Replace mock app list** in `screen_time_screen.dart` with real usage data
-- [ ] **Replace mock app list** in `categorizer_screen.dart` with real usage data
-- [ ] **Feed real screen time** into `FatigueDetector.analyze()` inputs
+- [x] **Request PACKAGE_USAGE_STATS permission** on first launch (Android)
+- [x] **Create `ScreenTimeService`** using `app_usage` package
+- [x] **Replace mock app list** in `screen_time_screen.dart` with real usage data
+- [x] **Replace mock app list** in `categorizer_screen.dart` with real usage data
+- [x] **Feed real screen time** into `FatigueDetector.analyze()` inputs
 
 ### 🟡 Priority 3 — Notifications
 
-- [ ] **Create `NotificationService`** at `lib/shared/services/notification_service.dart`
-- [ ] **Initialize notifications** in `main.dart`
-- [ ] **Habit reminders** — per-habit scheduled notification at user-set time
-- [ ] **Screen time warnings** — alert when approaching daily limit
-- [ ] **Focus session nudge** — "You haven't focused today" end-of-day reminder
-- [ ] **Streak milestone celebrations** — 7, 21, 30 day habit streaks
+- [x] **Create `NotificationService`** at `lib/shared/services/notification_service.dart`
+- [x] **Initialize notifications** in `main.dart`
+- [x] **Habit reminders** — per-habit scheduled notification at user-set time
+- [x] **Screen time warnings** — alert when approaching daily limit
+- [x] **Focus session nudge** — "You haven't focused today" end-of-day reminder
+- [x] **Streak milestone celebrations** — 7, 21, 30 day habit streaks
 
 ### 🟠 Priority 4 — Security & Production Readiness
 
-- [ ] **Set Firestore security rules** (replace test mode)
+- [x] **Set Firestore security rules** (replace test mode)
   ```
   Only allow users to read/write their own documents
   Validate data types on write
   ```
-- [ ] **Enable Firebase App Check** (prevent unauthorized API access)
-- [ ] **Add Firebase Crashlytics** for error monitoring
-- [ ] **Add input sanitization** on all text fields
-- [ ] **Handle Firestore offline mode** gracefully
+- [x] **Enable Firebase App Check** (prevent unauthorized API access)
+- [x] **Add Firebase Crashlytics** for error monitoring
+- [x] **Add input sanitization** on all text fields
+- [x] **Handle Firestore offline mode** gracefully
 
 ### 🔵 Priority 5 — UX Polish
 
-- [ ] **Onboarding flow** (3 screens for new users — name, goals, daily limit)
-- [ ] **Settings screen** (daily limits, notification preferences, theme toggle)
-- [ ] **Profile screen** (edit name, avatar, timezone)
-- [ ] **Empty states** on all screens when no data exists yet
-- [ ] **Loading skeletons** while Firestore data loads
-- [ ] **Pull to refresh** on dashboard and insights
-- [ ] **Dark mode** support (tokens already in `app_theme.dart`)
+- [x] **Onboarding flow** (3 screens for new users — name, goals, daily limit)
+- [x] **Settings screen** (daily limits, notification preferences, theme toggle)
+- [x] **Profile screen** (edit name, avatar, timezone)
+- [x] **Empty states** on all screens when no data exists yet
+- [x] **Loading skeletons** while Firestore data loads
+- [x] **Pull to refresh** on dashboard and insights
+- [x] **Dark mode** support (tokens already in `app_theme.dart`)
 
 ### 🔵 Priority 6 — Future Features
 
@@ -202,9 +203,12 @@ lib/
 │   │   ├── login_screen.dart         # Login UI
 │   │   ├── signup_screen.dart        # Signup UI
 │   │   └── otp_screen.dart           # Phone OTP UI
+│   ├── onboarding/
+│   │   └── onboarding_screen.dart    # 3-step first-run setup
 │   ├── dashboard/
 │   │   ├── dashboard_screen.dart     # Home screen
-│   │   └── main_shell.dart           # Nav shell, AppBar, Drawer
+│   │   ├── main_shell.dart           # Nav shell, AppBar, Drawer
+│   │   └── home_entry_screen.dart    # Onboarding gate after auth
 │   ├── screen_time/
 │   │   └── screen_time_screen.dart   # Weekly chart, app list
 │   ├── app_categorizer/
@@ -219,17 +223,50 @@ lib/
 │   │   └── habits_screen.dart        # Habit list, add sheet, toggle
 │   └── insights/
 │       └── insights_screen.dart      # Charts, AI insights, consistency
+│   ├── profile/
+│   │   └── profile_screen.dart       # Name/avatar/timezone edits
+│   └── settings/
+│       └── settings_screen.dart      # Theme, notifications, limits
 └── shared/
     ├── widgets/                       # (empty — reusable widgets go here)
     └── services/
-        ├── firestore_service.dart     # TODO: create this
-        ├── screen_time_service.dart   # TODO: create this
-        └── notification_service.dart  # TODO: create this
+      ├── firestore_service.dart     # Firestore reads/writes + analytics streams
+      ├── fastapi_service.dart       # FastAPI daily metrics client
+      ├── screen_time_service.dart   # App usage permission + usage aggregation
+      ├── notification_service.dart  # Local reminders, nudges, and alerts
+  ├── app_preferences_service.dart # Local onboarding/theme/limit prefs
+      └── input_sanitizer.dart       # Centralized input cleanup/normalization
 ```
 
 ---
 
 ## 🚀 Getting Started
+
+## 🧪 10-Minute Phone-Only Test Checklist
+
+Use this when you want to test for hours without keeping the laptop connected.
+
+1. Install and open the app once from your laptop (debug build is fine).
+2. Log in on your phone and grant permissions:
+  - Notifications
+  - Usage Access (Android)
+  - Disable battery optimization for the app (recommended for background jobs)
+3. Go to Home and verify the Sync Status card appears.
+4. Disconnect laptop from phone (USB off) and close laptop/backend.
+5. Use your phone normally for 10 minutes (open a few apps).
+6. Re-open LifeInSync and check Home:
+  - Sync status should show either `Cloud synced` or `Pending upload`
+  - Last sync time should update
+  - Tracked apps count should be non-zero after normal phone usage
+7. Open Screen Time and confirm today's usage increases.
+8. Open Fatigue Tracker and refresh once; score/history should update from real usage.
+9. Turn internet off for 2 minutes, make one change (habit toggle or setting), then turn internet on.
+10. Re-open app after a minute and confirm your change remains (offline cache + sync).
+
+Expected result:
+- App keeps working without laptop.
+- Data is saved locally when offline and syncs to Firestore when internet returns.
+- Background sync continues periodically on Android (subject to OEM battery rules).
 
 ### Prerequisites
 ```bash
@@ -241,7 +278,7 @@ dart --version       # Dart 3.x+
 ```bash
 # 1. Clone the repo
 git clone https://github.com/your-org/lifeinSync.git
-cd lifeinSync
+cd lifeinSync 
 
 # 2. Install dependencies
 flutter pub get
@@ -252,12 +289,23 @@ flutter pub get
 # - Enable Firestore (test mode)
 # - Run: flutterfire configure
 # - This generates lib/firebase_options.dart
+# - Enable App Check in Firebase Console (Play Integrity for Android)
+# - Enable Crashlytics in Firebase Console
 
-# 4. Add Google Client ID for web (in web/index.html)
+# 4. Start FastAPI backend (required for live daily behavior metrics)
+cd backend
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 5. Run Flutter app with backend URL
+cd ..
+flutter run --dart-define=FASTAPI_BASE_URL=http://10.0.2.2:8000
+
+# 6. Add Google Client ID for web (in web/index.html)
 # <meta name="google-signin-client_id" content="YOUR_ID.apps.googleusercontent.com">
-
-# 5. Run
-flutter run
 ```
 
 ### Android Permissions
@@ -317,6 +365,8 @@ service cloud.firestore {
 }
 ```
 
+Rules source file: `firestore.rules`
+
 ---
 
 ## 📦 Key Dependencies
@@ -324,7 +374,9 @@ service cloud.firestore {
 ```yaml
 firebase_core: ^3.3.0
 firebase_auth: ^5.1.0
-cloud_firestore: ^5.4.0        # Add this next
+cloud_firestore: ^5.4.0
+firebase_app_check: ^0.3.2+5
+firebase_crashlytics: ^4.1.3
 google_sign_in: ^6.2.1
 flutter_riverpod: ^2.5.1
 fl_chart: ^0.68.0
@@ -340,19 +392,13 @@ drift: ^2.18.0
 
 ## 👥 For the Next Developer
 
-**Where to start:** `lib/shared/services/firestore_service.dart` — this is the most important file to create. Once it exists, you can wire it into each screen one at a time.
+**Where to start:** `lib/shared/services/firestore_service.dart` and `lib/shared/services/fastapi_service.dart` for cloud data and backend metrics.
 
 **Order of work:**
-1. Create `FirestoreService` (all CRUD methods)
-2. Wire signup → creates user profile in Firestore
-3. Wire habits screen → `StreamBuilder` on `getHabitsStream()`
-4. Wire focus screen → save session on `_onTimerComplete()`
-5. Wire fatigue screen → save score daily
-6. Wire insights → read real data
-7. Replace mock screen time with `app_usage`
-8. Add notifications
-9. Set security rules
-10. Test end-to-end on real Android device
+1. Keep Firestore rules deployed from `firestore.rules`
+2. Keep FastAPI deployed with Firebase token verification enabled
+3. Maintain App Check + Crashlytics setup in release builds
+4. Test end-to-end on a real Android device
 
 **All mock data is clearly marked** — search for `// Sample` or `// Mock` comments in each screen file to find exactly what needs replacing.
 

@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/theme/app_theme.dart';
+import '../../shared/services/fastapi_service.dart';
+import '../../shared/services/firestore_service.dart';
+import '../../shared/services/input_sanitizer.dart';
+import '../../shared/services/app_preferences_service.dart';
 import 'auth_service.dart';
 import 'signup_screen.dart';
 import 'otp_screen.dart';
-import '../dashboard/main_shell.dart';
+import '../dashboard/home_entry_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -22,6 +28,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
   bool _obscurePassword = true;
+
+  AppLocalizations get _t => AppLocalizations(
+        AppPreferencesService.instance.authLocale.value ?? const Locale('en'),
+      );
 
   @override
   void dispose() {
@@ -45,16 +55,23 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
+    return ValueListenableBuilder<Locale?>(
+      valueListenable: AppPreferencesService.instance.authLocale,
+      builder: (context, _, __) {
+        return Scaffold(
+          backgroundColor: AppTheme.background,
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _buildAuthLanguagePicker(),
+                ),
                 const SizedBox(height: 40),
 
                 // ── Logo ──────────────────────────────────
@@ -63,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 // ── Welcome title ─────────────────────────
                 Text(
-                  'Welcome Back',
+                  _t.tr('welcomeBack'),
                   style: _r(
                     size: 32,
                     weight: FontWeight.w700,
@@ -75,7 +92,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 8),
 
                 Text(
-                  'Sign in to continue your journey',
+                  _t.tr('signInJourney'),
                   style: _r(
                     size: 14,
                     weight: FontWeight.w500,
@@ -87,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 44),
 
                 // ── Email field ───────────────────────────
-                _buildFieldLabel('Email'),
+                _buildFieldLabel(_t.tr('email')),
                 const SizedBox(height: 8),
                 _buildEmailField()
                     .animate()
@@ -96,7 +113,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 20),
 
                 // ── Password field ────────────────────────
-                _buildFieldLabel('Password'),
+                _buildFieldLabel(_t.tr('password')),
                 const SizedBox(height: 8),
                 _buildPasswordField()
                     .animate()
@@ -115,7 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     child: Text(
-                      'Forgot password?',
+                      _t.tr('forgotPassword'),
                       style: _r(
                         size: 13,
                         weight: FontWeight.w600,
@@ -129,7 +146,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 // ── Sign In button ────────────────────────
                 _buildPrimaryButton(
-                  label: 'Sign In',
+                  label: _t.tr('signIn'),
                   onTap: _signInWithEmail,
                   isLoading: _isLoading,
                 ).animate().fadeIn(delay: 400.ms).slideY(begin: 0.15),
@@ -144,7 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     Expanded(
                       child: _buildSocialButton(
-                        label: 'Google',
+                        label: _t.tr('google'),
                         icon: Icons.g_mobiledata_rounded,
                         iconColor: const Color(0xFFEA4335),
                         onTap: _signInWithGoogle,
@@ -153,13 +170,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(width: 14),
                     Expanded(
                       child: _buildSocialButton(
-                        label: 'Phone OTP',
+                        label: _t.tr('phoneOtp'),
                         icon: Icons.phone_outlined,
                         iconColor: AppTheme.primary,
-                        onTap: () => Navigator.push(
-                          context,
-                          _slideRoute(const OtpScreen()),
-                        ),
+                        onTap: _startPhoneOtp,
                       ),
                     ),
                   ],
@@ -169,9 +183,59 @@ class _LoginScreenState extends State<LoginScreen> {
                 // ── Sign Up link ──────────────────────────
                 _buildSignUpLink().animate().fadeIn(delay: 520.ms),
                 const SizedBox(height: 32),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAuthLanguagePicker() {
+    final selectedCode =
+        AppPreferencesService.instance.authLocale.value?.languageCode ?? 'en';
+
+    return PopupMenuButton<String>(
+      tooltip: _t.tr('language'),
+      onSelected: (code) async {
+        await AppPreferencesService.instance.setAuthLocaleCode(code);
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'en',
+          child: Text(_t.tr('english')),
+        ),
+        PopupMenuItem(
+          value: 'hi',
+          child: Text(_t.tr('hindi')),
+        ),
+        PopupMenuItem(
+          value: 'gu',
+          child: Text(_t.tr('gujarati')),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.language_rounded, size: 18, color: AppTheme.primary),
+            const SizedBox(width: 6),
+            Text(
+              selectedCode.toUpperCase(),
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -316,8 +380,8 @@ class _LoginScreenState extends State<LoginScreen> {
     textInputAction: TextInputAction.next,
     style: _r(size: 14, weight: FontWeight.w500, color: AppTheme.textPrimary),
     validator: (v) {
-      if (v == null || v.isEmpty) return 'Please enter your email';
-      if (!v.contains('@')) return 'Enter a valid email';
+      if (v == null || v.isEmpty) return _t.tr('enterEmail');
+      if (!v.contains('@')) return _t.tr('validEmail');
       return null;
     },
     decoration: InputDecoration(
@@ -344,8 +408,8 @@ class _LoginScreenState extends State<LoginScreen> {
     onFieldSubmitted: (_) => _signInWithEmail(),
     style: _r(size: 14, weight: FontWeight.w500, color: AppTheme.textPrimary),
     validator: (v) {
-      if (v == null || v.isEmpty) return 'Please enter your password';
-      if (v.length < 6) return 'Minimum 6 characters';
+      if (v == null || v.isEmpty) return _t.tr('enterPassword');
+      if (v.length < 6) return _t.tr('min6Chars');
       return null;
     },
     decoration: InputDecoration(
@@ -426,7 +490,7 @@ class _LoginScreenState extends State<LoginScreen> {
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Text(
-          'or',
+          _t.tr('or'),
           style: _r(
             size: 12,
             weight: FontWeight.w600,
@@ -485,7 +549,7 @@ class _LoginScreenState extends State<LoginScreen> {
     child: RichText(
       textAlign: TextAlign.center,
       text: TextSpan(
-        text: "Don't have an account?  ",
+        text: '${_t.tr('dontHaveAccount')}  ',
         style: _r(
           size: 14,
           weight: FontWeight.w500,
@@ -493,7 +557,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         children: [
           TextSpan(
-            text: 'Sign Up',
+            text: _t.tr('signUp'),
             style: _r(
               size: 14,
               weight: FontWeight.w700,
@@ -520,11 +584,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // ── Actions ───────────────────────────────────────────────
   Future<void> _signInWithEmail() async {
+    final sanitizedEmail = InputSanitizer.sanitizeEmail(_emailController.text);
+    _emailController.text = sanitizedEmail;
+
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
       await _authService.signInWithEmail(
-        email: _emailController.text,
+        email: sanitizedEmail,
         password: _passwordController.text,
       );
       if (mounted) _goHome();
@@ -539,7 +606,10 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       final result = await _authService.signInWithGoogle();
-      if (result != null && mounted) _goHome();
+      if (result != null) {
+        await _ensureGoogleUserProfile(result.user);
+        if (mounted) _goHome();
+      }
     } catch (e) {
       _showError(e.toString().replaceAll('Exception: ', ''));
     } finally {
@@ -547,18 +617,60 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _ensureGoogleUserProfile(User? user) async {
+    if (user == null) return;
+
+    final uid = user.uid;
+    final email = InputSanitizer.sanitizeEmail(user.email ?? '');
+    final rawName = user.displayName ?? email.split('@').first;
+    final name = InputSanitizer.sanitizeName(rawName.isEmpty ? 'User' : rawName);
+
+    final existing = await FirestoreService.instance.getUserProfile(uid);
+    if (existing == null || existing.isEmpty) {
+      await FirestoreService.instance.createUserProfile(
+        uid: uid,
+        name: name,
+        email: email.isEmpty ? '${uid.substring(0, 6)}@no-email.local' : email,
+      );
+    } else {
+      await FirestoreService.instance.updateUserProfile(
+        uid: uid,
+        name: name,
+      );
+    }
+
+    try {
+      await FastApiService.instance.upsertUserProfile(
+        uid: uid,
+        name: name,
+      );
+    } catch (_) {
+      // Firestore remains source of truth if backend is temporarily unavailable.
+    }
+  }
+
+  void _startPhoneOtp() {
+    Navigator.push(
+      context,
+      _slideRoute(const OtpScreen()),
+    );
+  }
+
   void _forgotPassword() async {
-    if (_emailController.text.isEmpty) {
-      _showError('Enter your email above first');
+    final sanitizedEmail = InputSanitizer.sanitizeEmail(_emailController.text);
+    _emailController.text = sanitizedEmail;
+
+    if (sanitizedEmail.isEmpty) {
+      _showError(_t.tr('enterEmailFirst'));
       return;
     }
     try {
-      await _authService.sendPasswordReset(_emailController.text);
+      await _authService.sendPasswordReset(sanitizedEmail);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Password reset email sent!',
+              _t.tr('passwordResetSent'),
               style: _r(size: 14, weight: FontWeight.w500, color: Colors.white),
             ),
             backgroundColor: AppTheme.primary,
@@ -576,7 +688,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _goHome() => Navigator.pushReplacement(
     context,
-    MaterialPageRoute(builder: (_) => const MainShell()),
+    MaterialPageRoute(builder: (_) => const HomeEntryScreen()),
   );
 
   void _showError(String msg) {

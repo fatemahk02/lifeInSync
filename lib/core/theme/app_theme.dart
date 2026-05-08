@@ -187,6 +187,113 @@ class AppTheme {
     );
   }
 
+  // ── Dark Theme ────────────────────────────────────────────
+  static ThemeData get dark {
+    final base = ThemeData.dark(useMaterial3: true);
+    const darkBackground = Color(0xFF0F1613);
+    const darkSurface = Color(0xFF17211D);
+    const darkText = Color(0xFFE7F3EC);
+    const darkSubText = Color(0xFF9AB4A7);
+
+    return base.copyWith(
+      colorScheme: const ColorScheme.dark(
+        primary: primary,
+        secondary: secondary,
+        surface: darkSurface,
+        background: darkBackground,
+        error: error,
+        onPrimary: Colors.white,
+        onSecondary: Colors.white,
+        onSurface: darkText,
+        onBackground: darkText,
+      ),
+      scaffoldBackgroundColor: darkBackground,
+      textTheme: GoogleFonts.dmSansTextTheme(base.textTheme).copyWith(
+        displayLarge: GoogleFonts.fraunces(
+          fontSize: 48,
+          fontWeight: FontWeight.w700,
+          color: darkText,
+          height: 1.1,
+        ),
+        displayMedium: GoogleFonts.fraunces(
+          fontSize: 36,
+          fontWeight: FontWeight.w700,
+          color: darkText,
+          height: 1.2,
+        ),
+        headlineLarge: GoogleFonts.fraunces(
+          fontSize: 28,
+          fontWeight: FontWeight.w600,
+          color: darkText,
+        ),
+        headlineMedium: GoogleFonts.dmSans(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          color: darkText,
+        ),
+        headlineSmall: GoogleFonts.dmSans(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: darkText,
+        ),
+        bodyLarge: GoogleFonts.dmSans(
+          fontSize: 16,
+          color: darkText,
+          height: 1.5,
+        ),
+        bodyMedium: GoogleFonts.dmSans(
+          fontSize: 14,
+          color: darkText,
+          height: 1.5,
+        ),
+        bodySmall: GoogleFonts.dmSans(
+          fontSize: 12,
+          color: darkSubText,
+          height: 1.4,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: darkSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        margin: EdgeInsets.zero,
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: darkBackground,
+        elevation: 0,
+        centerTitle: false,
+        iconTheme: const IconThemeData(color: darkText),
+        titleTextStyle: GoogleFonts.dmSans(
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: darkText,
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: darkSurface,
+        indicatorColor: primary.withOpacity(0.18),
+        iconTheme: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) {
+            return const IconThemeData(color: primary, size: 24);
+          }
+          return const IconThemeData(color: darkSubText, size: 22);
+        }),
+        labelTextStyle: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) {
+            return GoogleFonts.dmSans(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: primary,
+            );
+          }
+          return GoogleFonts.dmSans(fontSize: 11, color: darkSubText);
+        }),
+        elevation: 0,
+        height: 72,
+      ),
+    );
+  }
+
   // ── Reusable Decorations ──────────────────────────────────
   static BoxDecoration get primaryGradientCard => const BoxDecoration(
     gradient: LinearGradient(

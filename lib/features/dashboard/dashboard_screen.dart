@@ -1,29 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/theme/app_theme.dart';
+import '../app_categorizer/category_rules_engine.dart';
+import '../../shared/services/firestore_service.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback? onStartFocus;
+
+  const DashboardScreen({super.key, this.onStartFocus});
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final name = user?.displayName ?? user?.email ?? 'Friend';
+    final uid = user?.uid;
+    final name = user?.displayName ?? user?.email ?? context.l10n.tr('friend');
     final hour = DateTime.now().hour;
     final greeting = hour < 12
-        ? 'Good morning'
+      ? context.l10n.tr('goodMorning')
         : hour < 17
-        ? 'Good afternoon'
-        : 'Good evening';
+      ? context.l10n.tr('goodAfternoon')
+      : context.l10n.tr('goodEvening');
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       // FIX: No AppBar here — MainShell provides the AppBar
       // FIX: No avatar here — MainShell AppBar has the avatar
-      body: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
-        slivers: [
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await Future<void>.delayed(const Duration(milliseconds: 450));
+        },
+        child: CustomScrollView(
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
+          slivers: [
           // ── Greeting header (no avatar — it's in AppBar now) ──
           SliverToBoxAdapter(
             child: Padding(
@@ -51,25 +64,31 @@ class DashboardScreen extends StatelessWidget {
             padding: const EdgeInsets.all(24),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                _WellbeingScoreCard()
+                _SyncStatusCard(uid: uid)
                     .animate()
-                    .fadeIn(delay: 100.ms)
+                    .fadeIn(delay: 80.ms)
                     .slideY(begin: 0.15),
+                const SizedBox(height: 12),
+
+                _WellbeingScoreCard(uid: uid)
+                  .animate()
+                  .fadeIn(delay: 100.ms)
+                  .slideY(begin: 0.15),
                 const SizedBox(height: 16),
 
-                _QuickStatsRow()
+                _QuickStatsRow(uid: uid)
                     .animate()
                     .fadeIn(delay: 200.ms)
                     .slideY(begin: 0.15),
                 const SizedBox(height: 16),
 
-                _TodayFocusCard()
+                _TodayFocusCard(onStartFocus: onStartFocus)
                     .animate()
-                    .fadeIn(delay: 300.ms)
-                    .slideY(begin: 0.15),
+                  .fadeIn(delay: 300.ms)
+                  .slideY(begin: 0.15),
                 const SizedBox(height: 16),
 
-                _ScreenTimeSummaryCard()
+                _ScreenTimeSummaryCard(uid: uid)
                     .animate()
                     .fadeIn(delay: 400.ms)
                     .slideY(begin: 0.15),
@@ -81,7 +100,7 @@ class DashboardScreen extends StatelessWidget {
                     .slideY(begin: 0.15),
                 const SizedBox(height: 16),
 
-                _FatigueBadgeCard()
+                _FatigueBadgeCard(uid: uid)
                     .animate()
                     .fadeIn(delay: 600.ms)
                     .slideY(begin: 0.15),
@@ -90,160 +109,304 @@ class DashboardScreen extends StatelessWidget {
               ]),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-// ── Wellbeing Score — FIXED: score visible, no overlap ────────
-class _WellbeingScoreCard extends StatelessWidget {
+class _SyncStatusCard extends StatelessWidget {
+  final String? uid;
+
+  const _SyncStatusCard({required this.uid});
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF3DBE7A), Color(0xFF1E7A4E)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [AppTheme.primaryShadow],
-      ),
-      child: Row(
-        children: [
-          // FIX: Score on left, ring on right, no overlap
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Wellbeing Score',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
+    if (uid == null) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirestoreService.instance.streamLiveUsageDocument(uid!),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data();
+        final lastSync = (data?['deviceLocalUpdatedAt'] as Timestamp?)?.toDate() ??
+            (data?['updatedAt'] as Timestamp?)?.toDate();
+        final appsCount = (data?['trackedAppsCount'] as num?)?.toInt() ?? 0;
+
+        final fromCache = snapshot.data?.metadata.isFromCache ?? true;
+        final pendingWrites = snapshot.data?.metadata.hasPendingWrites ?? false;
+        final cloudHealthy = !fromCache && !pendingWrites;
+
+        final statusLabel = cloudHealthy
+          ? context.l10n.tr('cloudSynced')
+            : pendingWrites
+          ? context.l10n.tr('pendingUpload')
+          : context.l10n.tr('usingOfflineCache');
+
+        final statusColor = cloudHealthy
+            ? const Color(0xFF2E9B67)
+            : pendingWrites
+            ? const Color(0xFFDA8A1B)
+            : const Color(0xFF8A8A8A);
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: statusColor.withOpacity(0.25)),
+            boxShadow: [AppTheme.cardShadowLight],
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.cloud_done_rounded, color: statusColor, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      statusLabel,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: statusColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      lastSync == null
+                          ? context.l10n.tr('waitingFirstSync')
+                          : '${context.l10n.tr('lastSync')}: ${_formatTime(lastSync)} • ${context.l10n.tr('trackedAppsTitle')}: $appsCount',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 10),
-                // FIX: Large score text fully visible
-                const Text(
-                  '78',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 72,
-                    fontWeight: FontWeight.w800,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.trending_up_rounded,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  static String _formatTime(DateTime dt) {
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+}
+
+// ── Wellbeing Score — FIXED: score visible, no overlap ────────
+class _WellbeingScoreCard extends StatelessWidget {
+  final String? uid;
+
+  _WellbeingScoreCard({required this.uid});
+
+  final _firestore = FirestoreService.instance;
+
+  @override
+  Widget build(BuildContext context) {
+    if (uid == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder<int>(
+      future: _firestore.getFatigueScoreForDate(uid!, DateTime.now()),
+      builder: (context, snapshot) {
+        final fatigue = snapshot.data ?? 0;
+        final wellbeing = (100 - fatigue).clamp(0, 100);
+
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF3DBE7A), Color(0xFF1E7A4E)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [AppTheme.primaryShadow],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10n.tr('wellbeingScore'),
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '$wellbeing',
+                      style: const TextStyle(
                         color: Colors.white,
-                        size: 14,
+                        fontSize: 72,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
                       ),
-                      SizedBox(width: 4),
-                      Text(
-                        '+6 from yesterday',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      context.l10n.tr('basedOnTodaysFatigue'),
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.9),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 16),
+              SizedBox(
+                width: 90,
+                height: 90,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox.expand(
+                      child: CircularProgressIndicator(
+                        value: wellbeing / 100,
+                        strokeWidth: 8,
+                        backgroundColor: Colors.white.withOpacity(0.2),
+                        valueColor: const AlwaysStoppedAnimation(Colors.white),
+                        strokeCap: StrokeCap.round,
+                      ),
+                    ),
+                    Text(
+                      '$wellbeing%',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-
-          const SizedBox(width: 16),
-
-          // FIX: Ring on right, properly sized, won't overlap left side
-          SizedBox(
-            width: 90,
-            height: 90,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox.expand(
-                  child: CircularProgressIndicator(
-                    value: 0.78,
-                    strokeWidth: 8,
-                    backgroundColor: Colors.white.withOpacity(0.2),
-                    valueColor: const AlwaysStoppedAnimation(Colors.white),
-                    strokeCap: StrokeCap.round,
-                  ),
-                ),
-                const Text(
-                  '78%',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
 // ── Quick Stats ───────────────────────────────────────────────
 class _QuickStatsRow extends StatelessWidget {
+  final String? uid;
+
+  _QuickStatsRow({required this.uid});
+
+  final _firestore = FirestoreService.instance;
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _StatCard(
-            icon: Icons.timer_rounded,
-            iconColor: AppTheme.secondary,
-            label: 'Focus',
-            value: '2h 15m',
-            sub: 'today',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.check_circle_rounded,
-            iconColor: AppTheme.primary,
-            label: 'Habits',
-            value: '4 / 6',
-            sub: 'done',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.phone_android_rounded,
-            iconColor: const Color(0xFFFF6B6B),
-            label: 'Screen',
-            value: '3h 40m',
-            sub: 'today',
-          ),
-        ),
-      ],
+    if (uid == null) {
+      return const SizedBox.shrink();
+    }
+
+    final now = DateTime.now();
+    final dayStart = DateTime(now.year, now.month, now.day);
+    final dayEnd = dayStart.add(const Duration(days: 1));
+
+    return FutureBuilder<_QuickStatsData>(
+      future: _load(uid!, dayStart, dayEnd),
+      builder: (context, snapshot) {
+        final data = snapshot.data ??
+            const _QuickStatsData(
+              focusMinutes: 0,
+              completedHabits: 0,
+              totalHabits: 0,
+              screenMinutes: 0,
+            );
+
+        final focusHours = data.focusMinutes ~/ 60;
+        final focusMins = data.focusMinutes % 60;
+        final screenHours = data.screenMinutes ~/ 60;
+        final screenMins = data.screenMinutes % 60;
+
+        return Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                icon: Icons.timer_rounded,
+                iconColor: AppTheme.secondary,
+                label: context.l10n.tr('focusShort'),
+                value: '${focusHours}h ${focusMins}m',
+                sub: context.l10n.tr('today'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.check_circle_rounded,
+                iconColor: AppTheme.primary,
+                label: context.l10n.tr('habits'),
+                value: '${data.completedHabits} / ${data.totalHabits}',
+                sub: context.l10n.tr('doneWord'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.phone_android_rounded,
+                iconColor: const Color(0xFFFF6B6B),
+                label: context.l10n.tr('screenTimeTitle'),
+                value: '${screenHours}h ${screenMins}m',
+                sub: context.l10n.tr('today'),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
+
+  Future<_QuickStatsData> _load(
+    String uid,
+    DateTime dayStart,
+    DateTime dayEnd,
+  ) async {
+    final focus = await _firestore.getCompletedFocusMinutesInRange(
+      uid: uid,
+      start: dayStart,
+      end: dayEnd,
+    );
+    final completedHabits = await _firestore.getCompletedHabitsToday(uid);
+    final totalHabits = await _firestore.getTotalHabits(uid);
+    final usage = await _firestore.getLiveUsageSnapshot(uid);
+
+    return _QuickStatsData(
+      focusMinutes: focus,
+      completedHabits: completedHabits,
+      totalHabits: totalHabits,
+      screenMinutes: usage?.totalScreenMinutesToday ?? 0,
+    );
+  }
+}
+
+class _QuickStatsData {
+  final int focusMinutes;
+  final int completedHabits;
+  final int totalHabits;
+  final int screenMinutes;
+
+  const _QuickStatsData({
+    required this.focusMinutes,
+    required this.completedHabits,
+    required this.totalHabits,
+    required this.screenMinutes,
+  });
 }
 
 class _StatCard extends StatelessWidget {
@@ -288,6 +451,10 @@ class _StatCard extends StatelessWidget {
 
 // ── Focus Card ────────────────────────────────────────────────
 class _TodayFocusCard extends StatelessWidget {
+  final VoidCallback? onStartFocus;
+
+  const _TodayFocusCard({this.onStartFocus});
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -315,30 +482,37 @@ class _TodayFocusCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Ready to focus?',
+                Text(
+                  context.l10n.tr('readyToFocus'),
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Start a Pomodoro session',
+                  context.l10n.tr('startPomodoro'),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            decoration: BoxDecoration(
-              color: AppTheme.secondary,
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onStartFocus,
               borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              'Start',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
+              child: Ink(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                decoration: BoxDecoration(
+                  color: AppTheme.secondary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  context.l10n.tr('start'),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
               ),
             ),
           ),
@@ -350,44 +524,93 @@ class _TodayFocusCard extends StatelessWidget {
 
 // ── Screen Time Summary ───────────────────────────────────────
 class _ScreenTimeSummaryCard extends StatelessWidget {
+  final String? uid;
+
+  _ScreenTimeSummaryCard({required this.uid});
+
+  final _firestore = FirestoreService.instance;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [AppTheme.cardShadowLight],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
+    if (uid == null) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<LiveUsageSnapshot?>(
+      stream: _firestore.streamLiveUsageSnapshot(uid!),
+      builder: (context, snapshot) {
+        final usage = snapshot.data;
+        final total = usage?.totalScreenMinutesToday ?? 0;
+        final hours = total ~/ 60;
+        final minutes = total % 60;
+
+        var productive = 0;
+        var entertainment = 0;
+        var social = 0;
+
+        for (final app in usage?.topApps ?? const <Map<String, dynamic>>[]) {
+          final m = (app['usageMinutes'] as num?)?.toInt() ?? 0;
+          final packageName = (app['packageName'] as String?) ?? '';
+          final appName = (app['appName'] as String?) ?? '';
+          final category = CategoryRulesEngine.categorize(packageName, appName);
+
+          if (category == AppCategory.productive) productive += m;
+          if (category == AppCategory.entertainment) entertainment += m;
+          if (category == AppCategory.social) social += m;
+        }
+
+        final denom = total <= 0 ? 1 : total;
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [AppTheme.cardShadowLight],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Screen Time',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              Row(
+                children: [
+                  Text(
+                    context.l10n.tr('screenTimeTitle'),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${hours}h ${minutes}m ${context.l10n.tr('today')}',
+                    style: TextStyle(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
-              const Spacer(),
-              Text(
-                '3h 40m today',
-                style: TextStyle(
-                  color: AppTheme.primary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
+              const SizedBox(height: 16),
+              _CategoryBar(
+                context.l10n.tr('productive'),
+                productive / denom,
+                AppTheme.catProductive,
+              ),
+              const SizedBox(height: 10),
+              _CategoryBar(
+                context.l10n.tr('entertainment'),
+                entertainment / denom,
+                AppTheme.catEntertainment,
+              ),
+              const SizedBox(height: 10),
+              _CategoryBar(
+                context.l10n.tr('social'),
+                social / denom,
+                AppTheme.catSocial,
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          _CategoryBar('Productive', 0.45, AppTheme.catProductive),
-          const SizedBox(height: 10),
-          _CategoryBar('Entertainment', 0.30, AppTheme.catEntertainment),
-          const SizedBox(height: 10),
-          _CategoryBar('Social', 0.25, AppTheme.catSocial),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -437,17 +660,68 @@ class _CategoryBar extends StatelessWidget {
 
 // ── Habits Summary ────────────────────────────────────────────
 class _HabitsSummaryCard extends StatelessWidget {
+  final _firestore = FirestoreService.instance;
+
   @override
   Widget build(BuildContext context) {
-    final habits = [
-      {'emoji': '💧', 'name': 'Drink Water', 'done': true},
-      {'emoji': '🏃', 'name': 'Exercise', 'done': true},
-      {'emoji': '📚', 'name': 'Read 20 min', 'done': false},
-      {'emoji': '🧘', 'name': 'Meditate', 'done': true},
-      {'emoji': '😴', 'name': 'Sleep by 11pm', 'done': false},
-    ];
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
-    final doneCount = habits.where((h) => h['done'] == true).length;
+    if (uid == null) {
+      return _buildCard(
+        context: context,
+        doneCount: 0,
+        totalCount: 0,
+        chips: <Widget>[
+          Text(context.l10n.tr('signInToViewHabits')),
+        ],
+      );
+    }
+
+    return StreamBuilder<List<HabitItem>>(
+      stream: _firestore.streamHabits(uid),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return Container(
+            height: 120,
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [AppTheme.cardShadowLight],
+            ),
+          );
+        }
+
+        final habits = snapshot.data ?? const <HabitItem>[];
+        final doneCount = habits.where((h) => h.completedToday).length;
+
+        final chips = habits
+            .map(
+              (h) => _HabitChip(
+                emoji: h.emoji,
+                name: h.name,
+                done: h.completedToday,
+              ),
+            )
+            .toList(growable: false);
+
+        return _buildCard(
+          context: context,
+          doneCount: doneCount,
+          totalCount: habits.length,
+          chips: chips,
+        );
+      },
+    );
+  }
+
+  Widget _buildCard({
+    required BuildContext context,
+    required int doneCount,
+    required int totalCount,
+    required List<Widget> chips,
+  }) {
+    final hasHabits = totalCount > 0;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -462,13 +736,13 @@ class _HabitsSummaryCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text(
-                "Today's Habits",
+              Text(
+                context.l10n.tr('todaysHabits'),
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
               ),
               const Spacer(),
               Text(
-                '$doneCount / ${habits.length}',
+                '$doneCount / $totalCount',
                 style: TextStyle(
                   color: AppTheme.primary,
                   fontWeight: FontWeight.w700,
@@ -478,19 +752,13 @@ class _HabitsSummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: habits
-                .map(
-                  (h) => _HabitChip(
-                    emoji: h['emoji'] as String,
-                    name: h['name'] as String,
-                    done: h['done'] as bool,
-                  ),
-                )
-                .toList(),
-          ),
+          if (!hasHabits)
+            Text(
+              context.l10n.tr('noHabitsHomeHint'),
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          else
+            Wrap(spacing: 8, runSpacing: 8, children: chips),
         ],
       ),
     );
@@ -546,49 +814,74 @@ class _HabitChip extends StatelessWidget {
 
 // ── Fatigue Badge ─────────────────────────────────────────────
 class _FatigueBadgeCard extends StatelessWidget {
+  final String? uid;
+
+  _FatigueBadgeCard({required this.uid});
+
+  final _firestore = FirestoreService.instance;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFF8A65).withOpacity(0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFFF8A65).withOpacity(0.25)),
-      ),
-      child: Row(
-        children: [
-          const Text('😐', style: TextStyle(fontSize: 34)),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Moderate Fatigue',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Heavy social/entertainment use detected',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
+    if (uid == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder<int>(
+      future: _firestore.getFatigueScoreForDate(uid!, DateTime.now()),
+      builder: (context, snapshot) {
+        final score = snapshot.data ?? 0;
+
+        final (emoji, title, subtitle, color) = score >= 75
+          ? ('🥵', context.l10n.tr('fatigueLevelHigh'), context.l10n.tr('fatigueHighHint'), const Color(0xFFE05C5C))
+          : score >= 50
+          ? ('😐', context.l10n.tr('fatigueLevelModerate'), context.l10n.tr('fatigueModerateHint'), const Color(0xFFFF8A65))
+          : score >= 25
+          ? ('🙂', context.l10n.tr('fatigueLevelMild'), context.l10n.tr('fatigueMildHint'), const Color(0xFFFFCA28))
+          : ('😌', context.l10n.tr('fatigueLowLabel'), context.l10n.tr('fatigueLowHint'), const Color(0xFF3DBE7A));
+
+        return Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withOpacity(0.25)),
           ),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF8A65).withOpacity(0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.arrow_forward_ios_rounded,
-              size: 14,
-              color: Color(0xFFFF8A65),
-            ),
+          child: Row(
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 34)),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$title ($score)',
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 14,
+                  color: color,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
